@@ -28,13 +28,24 @@ output_file = args.output_file
 
 # define functions for compression and decompression
 def compress(input_file_name, output_file_name):
+    header_bytes = set()  # ex '00001010' -> the dictionary, set of distinct bytes present in file
+    header_len = 0  # ex: '000000011' -> length of dictionary
+    dictionary_sorted = dict()
+    compressed_dict_value_length = 0
+    mapper = dict()  # create mapper (chars -> compressed chars), ex. mapper['A'] = '00'
+    compressed_file_length_bits = 3  # 3 bits -> added_bits length
+    num_added_bits_dec = (8 - compressed_file_length_bits) % 8  # (0-7) how many bits to add at the end of the file
+    added_bits = (bin(num_added_bits_dec)[2:]).zfill(3)  # ex '010'
+    end_bits = '0' * num_added_bits_dec
+
+    # get file statistics
     with open(input_file_name, 'rb') as f:
         # get content from input file
-        file_bytes = f.read(-1)
-
-        # get the set of distinct bytes present in file
-        # ex '00001010' -> the dictionary
-        header_bytes = set([byte.to_bytes(1, 'big') for byte in file_bytes])
+        next_byte = f.read(1)
+        while next_byte:
+            compressed_file_length_bits += 8  # increment file length in bits
+            header_bytes.update([next_byte[0].to_bytes(1, 'big')])
+            next_byte = f.read(1)
 
         # sort dict (for consistency)
         dictionary_sorted = sorted(header_bytes)
@@ -43,47 +54,48 @@ def compress(input_file_name, output_file_name):
         # config
         compressed_dict_value_length = math.ceil(math.log(len(header_bytes), 2))
 
-        # create mapper (chars -> compressed chars), ex. mapper['A'] = '00'
-        mapper = dict()
-
         i = 0
         for byte in dictionary_sorted:
             mapper[byte] = bin(i)[2:].zfill(compressed_dict_value_length)  # binary value ex. '001'
             i += 1
         del i
 
-        header_len = len(header_bytes).to_bytes(1, 'big')  # ex: '000000011' -> length of dictionary
+        header_len = len(header_bytes).to_bytes(1, 'big')
 
-        # compress text in file
-        compressed_content = ''
-        for val in file_bytes:
-            byte = val.to_bytes(1, 'big')
-            compressed_content += mapper[byte]
+    # compress and save to file
+    output_f = open(output_file_name, 'wb')
+    with open(input_file_name, 'rb') as f:
+        # write header and dict to output file
+        output_f.write(header_len)  # write size of dict
+        # write dict
+        for byte in dictionary_sorted:
+            output_f.write(byte)
 
-        compressed_file_length_bits = len(compressed_content) + 3  # +3 -> added_bits length
-        num_added_bits_dec = (8 - compressed_file_length_bits) % 8  # (0-7) how many bits to add at the end of the file
-        added_bits = (bin(num_added_bits_dec)[2:]).zfill(3)  # ex '010'
-        end_bits = '0' * num_added_bits_dec
+        # get content from input file
+        compressed_content = added_bits
+        next_byte = f.read(1)
+        while next_byte:
+            compressed_content += mapper[next_byte]
 
-        # add added_bits and end_bits to compressed file content
-        compressed_content = added_bits + compressed_content + end_bits
+            # read next byte
+            next_byte = f.read(1)
 
-        # write compressed content to output file
-        with open(output_file_name, 'wb') as output_f:
-            output_f.write(header_len)  # write size of dict
-            # write dict
-            for byte in dictionary_sorted:
-                output_f.write(byte)
+            # if this is the last byte append end_bits
+            if not next_byte:
+                compressed_content += end_bits
 
-            # write compressed file content
-            for i in range(0, len(compressed_content), 8):
+            # write compressed content to file
+            while len(compressed_content) >= 8:
                 # print('0b' + compressed_content[i:i + 8])  # bin value
                 # print(int('0b' + compressed_content[i:i+8], 2))  # dec value
                 # print(hex(int('0b' + compressed_content[i:i + 8], 2)))  # hex value
 
-                # convert 8 bits to binary value
-                decimal = int(compressed_content[i:i + 8], 2)
-                output_f.write(decimal.to_bytes(1, 'big'))  # write bytes to file
+                decimal = int(compressed_content[0:0 + 8], 2)  # convert 8 bits to binary value
+                output_f.write(decimal.to_bytes(1, 'big'))  # write byte to file
+                compressed_content = compressed_content[8:]
+
+        # close output file
+        output_f.close()
 
         # show details if specified
         if show_details:
@@ -94,14 +106,13 @@ def compress(input_file_name, output_file_name):
             print(f'header dict: {dictionary_sorted}')
             print(f'dict key length: {compressed_dict_value_length}')
             print(f'dict length: {len(header_bytes)}')
-            print(f'compressed content (first 20 bits): {compressed_content[:20]}...')
-            print(f'compressed content length: {len(compressed_content)}')
             print(f'num added bits: {num_added_bits_dec}')
             print(f'added bits (bin): {added_bits}')
             print(f'end bits (bin): {end_bits}')
 
 
 def decompress(input_file_name, output_file_name):
+    output_f = open(output_file_name, 'wb')
     with open(input_file_name, 'rb') as f:
         #########
         # config
@@ -116,15 +127,27 @@ def decompress(input_file_name, output_file_name):
         next_byte = f.read(1)[0]
         num_added_bits_dec = next_byte >> 5  # first 3 bits
 
-        compressed_content: str = bin(next_byte)[2:].zfill(8)  # first byte of compressed file
-        bytes_to_decompress = f.read(-1)
-        for byte in bytes_to_decompress:
-            compressed_content += bin(byte)[2:].zfill(8)
+        compressed_content: str = bin(next_byte)[2 + 3:].zfill(5)  # first 5 bits of compressed data
 
-        # write decompressed chars to output file
-        with open(output_file_name, 'wb') as output_f:
-            for i in range(3, len(compressed_content) - num_added_bits_dec, compressed_dict_key_length):
-                output_f.write(mapper[compressed_content[i:i+compressed_dict_key_length]])
+        # read compressed file byte by byte
+        next_byte = f.read(1)
+        while next_byte:
+            compressed_content += bin(next_byte[0])[2:].zfill(8)
+
+            # read next byte
+            next_byte = f.read(1)
+
+            # if this is the last byte remove added bits
+            if not next_byte:
+                compressed_content = compressed_content[:-num_added_bits_dec]
+
+            # write decompressed chars to output file
+            while len(compressed_content) >= compressed_dict_key_length:
+                output_f.write(mapper[compressed_content[0:0 + compressed_dict_key_length]])
+                compressed_content = compressed_content[compressed_dict_key_length:]
+
+        # close output file
+        output_f.close()
 
         # show details if specified
         if show_details:
@@ -136,8 +159,6 @@ def decompress(input_file_name, output_file_name):
             print(f'decompression mapper: {mapper}')
             print(f'dict key length: {compressed_dict_key_length}')
             print(f'dict length: {header_value}')
-            print(f'content to decompress (first 20 bits): {compressed_content[:20]}...')
-            print(f'content to decompress length: {len(compressed_content)}')
             print(f'num added bits: {num_added_bits_dec}')
 
 
