@@ -1,7 +1,6 @@
 import argparse
 import math
 
-
 # setup argument parser
 parser = argparse.ArgumentParser(prog='compressor.py', description='Program for compressing and decompressing files')
 parser.add_argument('-d', '--decompress', action='store_true',
@@ -137,12 +136,9 @@ def decompress(input_file_name, output_file_name):
             # read next byte
             next_byte = f.read(1)
 
-            # if this is the last byte remove added bits
-            if not next_byte:
-                compressed_content = compressed_content[:-num_added_bits_dec]
-
             # write decompressed chars to output file
-            while len(compressed_content) >= compressed_dict_key_length:
+            while (len(compressed_content) >= compressed_dict_key_length)\
+                    and (len(compressed_content) > num_added_bits_dec):
                 output_f.write(mapper[compressed_content[0:0 + compressed_dict_key_length]])
                 compressed_content = compressed_content[compressed_dict_key_length:]
 
@@ -168,7 +164,6 @@ if decompress_flag:
     decompress(input_file, output_file)
 else:
     compress(input_file, output_file)
-
 
 # FIXME: decompression test
 # decompress(output_file, 'decompressed_file.txt')
