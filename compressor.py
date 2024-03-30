@@ -32,26 +32,33 @@ def compress(input_file_name, output_file_name):
     dictionary_sorted = dict()
     compressed_dict_value_length = 0
     mapper = dict()  # create mapper (chars -> compressed chars), ex. mapper['A'] = '00'
-    compressed_file_length_bits = 3  # 3 bits -> added_bits length
-    num_added_bits_dec = (8 - compressed_file_length_bits) % 8  # (0-7) how many bits to add at the end of the file
-    added_bits = (bin(num_added_bits_dec)[2:]).zfill(3)  # ex '010'
-    end_bits = '0' * num_added_bits_dec
+    compressed_file_length = 0
+    num_added_bits_dec = 0  # (0-7) how many bits to add at the end of the file
+    added_bits = ''  # ex '010'
+    end_bits = ''  # ex '00'
 
     # get file statistics
     with open(input_file_name, 'rb') as f:
         # get content from input file
         next_byte = f.read(1)
         while next_byte:
-            compressed_file_length_bits += 8  # increment file length in bits
+            compressed_file_length += 1  # increment file length in bytes
             header_bytes.update([next_byte[0].to_bytes(1, 'big')])
             next_byte = f.read(1)
 
         # sort dict (for consistency)
         dictionary_sorted = sorted(header_bytes)
 
-        #########
-        # config
+        # set size of compressed dict char (bits)
         compressed_dict_value_length = math.ceil(math.log(len(header_bytes), 2))
+
+        # convert compressed file length to bits  # 3 bits -> added_bits length
+        compressed_file_length = 3 + (compressed_file_length * compressed_dict_value_length)
+
+        # set info about added bits
+        num_added_bits_dec = (8 - compressed_file_length) % 8
+        added_bits = (bin(num_added_bits_dec)[2:]).zfill(3)
+        end_bits = '0' * num_added_bits_dec
 
         i = 0
         for byte in dictionary_sorted:
